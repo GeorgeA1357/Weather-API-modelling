@@ -2,14 +2,14 @@ import openmeteo_requests
 import requests_cache
 import pandas as pd
 from retry_requests import retry
-import matplotlib.pyplot as plt
 import dash
-from dash import dcc, html
+from dash import dcc, html, Dash
 import plotly.graph_objs as go
+import time
+from joblib import dump,load 
+import os
+from datetime import datetime,timedelta
 
-
-
-# Setup Open-Meteo API client
 cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
@@ -26,10 +26,6 @@ def historical_data(latitude, longitude, start_date, end_date):
 
     responses = openmeteo.weather_api(url, params=params)
     response = responses[0]
-
-    print(f"\nHistorical Data for Coordinates {latitude}°N, {longitude}°E")
-    print(f"Elevation: {response.Elevation()} m asl")
-    print(f"Timezone: {response.Timezone()} {response.TimezoneAbbreviation()}")
 
     daily = response.Daily()
     daily_temperature_2m_max = daily.Variables(0).ValuesAsNumpy()
@@ -48,15 +44,10 @@ def historical_data(latitude, longitude, start_date, end_date):
         "temperature_2m_mean": daily_temperature_2m_mean
     }
 
-    daily_dataframe = pd.DataFrame(data=daily_data)
-    return daily_dataframe
+    return pd.DataFrame(data=daily_data)
 
-
+# Function to fetch forecast data
 def forecast_data(latitude, longitude):
-    cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-    retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-    openmeteo = openmeteo_requests.Client(session=retry_session)
-
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": latitude,
@@ -67,11 +58,6 @@ def forecast_data(latitude, longitude):
 
     responses = openmeteo.weather_api(url, params=params)
     response = responses[0]
-
-    print(f"Coordinates: {response.Latitude()}°N, {response.Longitude()}°E")
-    print(f"Elevation: {response.Elevation()} m asl")
-    print(f"Timezone: {response.Timezone()} {response.TimezoneAbbreviation()}")
-    print(f"Timezone difference to GMT+0: {response.UtcOffsetSeconds()} seconds")
 
     daily = response.Daily()
     daily_temperature_2m_max = daily.Variables(0).ValuesAsNumpy()
@@ -91,178 +77,151 @@ def forecast_data(latitude, longitude):
     return pd.DataFrame(data=daily_data)
 
 
-#f_df = forecast_data(52.5244, 13.4105)
-#f_df.to_csv(r"C:\Users\george.argyrou\Downloads\BerlinWeatherDataForecast.csv")
+locations = {
+    "Boston": {"latitude": 42.3601, "longitude": -71.0589},
+    "Hartford": {"latitude": 41.7637, "longitude": -72.6851},
+    "Portland": {"latitude": 43.6591, "longitude": -70.2568},
+    "New York City": {"latitude": 40.7128, "longitude": -74.0060},
+    "Philadelphia": {"latitude": 39.9526, "longitude": -75.1652},
+    "Newark": {"latitude": 40.7357, "longitude": -74.1724},
+    "Pittsburgh": {"latitude": 40.4406, "longitude": -79.9959},
+    "Baltimore": {"latitude": 39.2904, "longitude": -76.6122}
+}
+
+location_to_padd = {
+    "Boston": "PADD 1A",
+    "Hartford": "PADD 1A",
+    "Portland": "PADD 1A",
+    "New York City": "PADD 1B",
+    "Philadelphia": "PADD 1B",
+    "Newark": "PADD 1B",
+    "Pittsburgh": "PADD 1B",
+    "Baltimore": "PADD 1B"
+}
 
 
-
-# Example Usage
-#df = historical_data(latitude=52.5244, longitude=13.4105, start_date="2000-01-01", end_date="2024-11-15")
-# print(df)
-#df.to_csv(r"C:\Users\george.argyrou\Downloads\BerlinWeatherData.csv")
-
-f_df_raw=pd.read_csv(r"C:\Users\george.argyrou\Downloads\BerlinWeatherDataForecast.csv")
-df_raw=pd.read_csv(r"C:\Users\george.argyrou\Downloads\BerlinWeatherData.csv")
-
-df=df_raw.copy()
-df=df.drop(["Unnamed: 0"],axis=1).rename(columns={"temperature_2m_mean":"mean",
-                                                  "temperature_2m_max":"max",
-                                                  "temperature_2m_min":"min"})
-
-df["date"]=pd.to_datetime(df["date"])
-df["year"] = df["date"].dt.year
-df["day_count"] = df["date"].dt.dayofyear
-
-f_df=f_df_raw.copy()
-f_df=f_df.drop(["Unnamed: 0"],axis=1).rename(columns={"temperature_2m_max":"max",
-                                                  "temperature_2m_min":"min"})
-
-f_df["date"]=pd.to_datetime(f_df["date"])
-f_df["day_count"] = f_df["date"].dt.dayofyear
-
-h_df=df[df["day_count"].isin(f_df["day_count"])]
-mean_h_df=h_df.groupby("day_count").mean().reset_index()
+# Fetch historical and forecast data for all locations
+# historical_data_dict = {}
+# forecast_data_dict = {}
+# for location, coords in locations.items():
+#     historical_data_dict[location] = historical_data(
+#         latitude=coords["latitude"],
+#         longitude=coords["longitude"],
+#         start_date="2000-01-01",
+#         end_date="2024-11-15"
+#     )
+#     forecast_data_dict[location] = forecast_data(
+#         latitude=coords["latitude"],
+#         longitude=coords["longitude"]
+#     )
 
 
-
-current_year = f_df["date"].dt.year.max()
-years = sorted(h_df["year"].unique())
-year_weights = {year: max(0.5, 3 - (current_year - year) * 0.2) for year in years}
-year_alpha = {year: max(0.3, 1 - (current_year - year) * 0.1) for year in years}  # Alpha (0.3 to 1)
-
-plt.figure(figsize=(14, 10))
-
-for year in years:
-    subset = h_df[h_df["year"] == year]
-    plt.plot(
-        subset["day_count"],
-        subset["max"],
-        label=f"Historical Max {year}",
-        linewidth=year_weights[year],
-        alpha=year_alpha[year],
-        color="blue",
-    )
-plt.plot(f_df["day_count"], f_df["max"], label="Forecast Max", color="orange", linestyle="--", linewidth=3, alpha=1)
-plt.title("Max Temperatures: Historical vs Forecast", fontsize=20)
-plt.xlabel("Day of Year", fontsize=14)
-plt.ylabel("Max Temperature (°C)", fontsize=14)
-# plt.legend(fontsize=12, loc="upper left", frameon=True)
-plt.grid(True, linestyle="--", alpha=0.5)
-plt.xticks(fontsize=12)
-plt.yticks(fontsize=12)
-plt.tight_layout()
-plt.show()
-
-
-plt.figure(figsize=(14, 10))
-
-for year in years:
-    subset = h_df[h_df["year"] == year]
-    plt.plot(
-        subset["day_count"],
-        subset["min"],
-        label=f"Historical Min {year}",
-        linewidth=year_weights[year],
-        alpha=year_alpha[year],
-        color="green",
-    )
-plt.plot(f_df["day_count"], f_df["min"], label="Forecast Min", color="red", linestyle="--", linewidth=3, alpha=1)
-plt.title("Min Temperatures: Historical vs Forecast", fontsize=20)
-plt.xlabel("Day of Year", fontsize=14)
-plt.ylabel("Min Temperature (°C)", fontsize=14)
-# plt.legend(fontsize=12, loc="upper left", frameon=True)
-plt.grid(True, linestyle="--", alpha=0.5)
-plt.xticks(fontsize=12)
-plt.yticks(fontsize=12)
-plt.tight_layout()
-plt.show()
-
-
-
-plt.figure(figsize=(14, 10))
-plt.plot(mean_h_df["day_count"], mean_h_df["max"], label="Historical Avg Max", color="orange", linestyle="--", linewidth=3, alpha=1)
-plt.title("Max Temperatures: Historical vs Forecast", fontsize=20)
-plt.xlabel("Day of Year", fontsize=14)
-plt.ylabel("Max Temperature (°C)", fontsize=14)
-plt.plot(f_df["day_count"], f_df["max"], label="Forecast Max", color="Blue", linestyle="--", linewidth=3, alpha=1)
-plt.legend(fontsize=12, loc="upper left")
-plt.grid(True, linestyle="--", alpha=0.5)
-plt.xticks(fontsize=12)
-plt.yticks(fontsize=12)
-plt.tight_layout()
-plt.show()
-
-plt.figure(figsize=(14, 10))
-plt.plot(mean_h_df["day_count"], mean_h_df["min"], label="Historical Avg Min", color="orange", linestyle="--", linewidth=3, alpha=1)
-plt.title("Max Temperatures: Historical vs Forecast", fontsize=20)
-plt.xlabel("Day of Year", fontsize=14)
-plt.ylabel("Max Temperature (°C)", fontsize=14)
-plt.plot(f_df["day_count"], f_df["min"], label="Forecast Min", color="Blue", linestyle="--", linewidth=3, alpha=1)
-plt.legend(fontsize=12, loc="upper left")
-plt.grid(True, linestyle="--", alpha=0.5)
-plt.xticks(fontsize=12)
-plt.yticks(fontsize=12)
-plt.tight_layout()
-plt.show()
-
-
-
-
-
-
-
-
-
-
-# unique_years = df["year"].unique()
-# num_years = len(unique_years)
-
-# fig, axes = plt.subplots(nrows=num_years, ncols=1, figsize=(10, 5 * num_years), sharex=True)
-
-# for i, year in enumerate(unique_years):
-#     subset = df[df["year"] == year]
-#     ax = axes[i] if num_years > 1 else axes  # Handle single subplot case
-#     ax.plot(subset["day_count"], subset["mean"], label=f"Year {year}", color="C0", linewidth=2)
-#     ax.set_title(f"Mean Temperature for Year {year}", fontsize=14)
-#     ax.set_ylabel("Mean Temperature", fontsize=12)
-#     ax.grid(True, linestyle="--", alpha=0.5)
-#     ax.legend(loc="upper right", fontsize=10)
-
-# axes[-1].set_xlabel("Day Count", fontsize=12)
-# plt.tight_layout()
-# plt.show()
-
-
-# plt.figure(figsize=(12, 8))
-
-# for year in unique_years:
-#     subset = df[df["year"] == year]
-#     plt.plot(subset["day_count"], subset["mean"], label=f"Year {year}", linewidth=2, alpha=0.8)
-
-# plt.title("Mean Temperature by Day Count (All Years)", fontsize=18)
-# plt.xlabel("Day Count", fontsize=14)
-# plt.ylabel("Mean Temperature", fontsize=14)
-# plt.legend(
-#     title="Year", 
-#     fontsize=12, 
-#     title_fontsize=14, 
-#     loc="upper left", 
-#     bbox_to_anchor=(1, 1)
-# )
-# plt.grid(True, linestyle="--", alpha=0.5)
-# plt.show()
-
-
-# Initialize Dash app
-app = dash.Dash(__name__)
-
-# Dashboard layout
-app.layout = html.Div([
-    html.H1("Weather Dashboard", style={'text-align': 'center'}),
+# fetching data in batches so as to not exceed API minutely limit
+def fetch_data_in_batches(locations, batch_size=4, wait_time=60):
+    historical_data_dict = {}
+    forecast_data_dict = {}
     
-    html.Div([
+    location_items = list(locations.items())
+    
+    for i in range(0, len(location_items), batch_size):
+        batch = location_items[i:i + batch_size]
+        print(f"Processing batch {i // batch_size + 1}: {[loc[0] for loc in batch]}")
+
+        for location, coords in batch:
+            try:
+                historical_data_dict[location] = historical_data(
+                    latitude=coords["latitude"],
+                    longitude=coords["longitude"],
+                    start_date="2000-01-01",
+                    #end_date="2024-11-15"
+                    end_date=(datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
+
+                )
+                forecast_data_dict[location] = forecast_data(
+                    latitude=coords["latitude"],
+                    longitude=coords["longitude"]
+                )
+                print(f"Successfully fetched data for {location}")
+            except Exception as e:
+                print(f"Error fetching data for {location}: {e}")
+
+        if i + batch_size < len(location_items):  # Wait if there are more batches
+            print(f"Waiting for {wait_time} seconds to respect API limits...")
+            time.sleep(wait_time)
+
+    return historical_data_dict, forecast_data_dict
+
+#historical_data_dict, forecast_data_dict = fetch_data_in_batches(locations, batch_size=4, wait_time=60)
+
+def user_prompt_data(historical_file='historical_data_dict.joblib',forecast_file='forecast_data_dict.joblib',user_prompt=False):
+    if os.path.exists(historical_file) and os.path.exists(forecast_file):
+        response = input("Saved data files found. Do you want to fetch new data? (yes/no): ").strip().lower()
+        if response =="yes":
+            user_prompt=True
+        else:
+            pass
+
+    if user_prompt:
+        print("Fetching new data from API...")
+        historical_data_dict, forecast_data_dict = fetch_data_in_batches(locations, batch_size=4, wait_time=60)
+        print("Saving data to files...")
+        dump(historical_data_dict, historical_file)
+        dump(forecast_data_dict, forecast_file)
+    else:
+        print("Loading data from saved files...")
+        historical_data_dict = load(historical_file)
+        forecast_data_dict = load(forecast_file)
+        print("Loaded")
+    
+    return historical_data_dict, forecast_data_dict
+    
+
+historical_data_dict, forecast_data_dict=user_prompt_data()
+
+processed_data = {}
+for location, h_df in historical_data_dict.items():
+    f_df = forecast_data_dict[location]
+
+    h_df = h_df.rename(columns={"temperature_2m_mean": "mean", "temperature_2m_max": "max", "temperature_2m_min": "min"})
+    h_df["date"] = pd.to_datetime(h_df["date"])
+    h_df["year"] = h_df["date"].dt.year
+    h_df["day_count"] = h_df["date"].dt.dayofyear
+
+    f_df = f_df.rename(columns={"temperature_2m_max": "max", "temperature_2m_min": "min"})
+    f_df["date"] = pd.to_datetime(f_df["date"])
+    f_df["day_count"] = f_df["date"].dt.dayofyear
+
+    historical_overlap = h_df[h_df["day_count"].isin(f_df["day_count"])]
+    mean_historical = historical_overlap.groupby("day_count").mean().reset_index()
+
+    processed_data[location] = {
+        "historical": h_df,
+        "forecast": f_df,
+        "mean_historical": mean_historical
+    }
+
+
+
+# Assuming processed_data and location_to_padd are already defined
+padd1a_locations = {k: v for k, v in processed_data.items() if location_to_padd[k] == "PADD 1A"}
+padd1b_locations = {k: v for k, v in processed_data.items() if location_to_padd[k] == "PADD 1B"}
+
+# Dash app
+app = Dash(__name__)
+
+def generate_graphs(location, data):
+    h_df = data["historical"]
+    f_df = data["forecast"]
+    mean_h_df = data["mean_historical"]
+
+    years = sorted(h_df["year"].unique())
+    year_weights = {year: max(0.5, 3 - (f_df["date"].dt.year.max() - year) * 0.2) for year in years}
+    year_alpha = {year: max(0.3, 1 - (f_df["date"].dt.year.max() - year) * 0.1) for year in years}
+
+    graphs = [
+        # Max Temperature Graph
         dcc.Graph(
-            id="max-temperature-plot",
+            id=f"{location}-max-plot",
             figure={
                 "data": [
                     go.Scatter(
@@ -278,26 +237,21 @@ app.layout = html.Div([
                         x=f_df["day_count"],
                         y=f_df["max"],
                         mode="lines",
-                        line={"width": 5, "color": "#FF7F0E"},
+                        line={"width": 5, "color": "orange"},
                         name="Forecast Max"
                     )
                 ],
                 "layout": go.Layout(
-                    title="Max Temperatures: Historical vs Forecast",
-                    xaxis={"title": "Day Count"},
-                    yaxis={"title": "Max Temperature (°C)"},
-                    width=1200,  
-                    height=600,  
-                    legend={"x": 1, "y": 1},
+                    title=f"{location} - Max Temperatures",
+                    xaxis={"title": "Day of Year"},
+                    yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
             }
-        )
-    ]),
-
-    html.Div([
+        ),
+        # Min Temperature Graph
         dcc.Graph(
-            id="min-temperature-plot",
+            id=f"{location}-min-plot",
             figure={
                 "data": [
                     go.Scatter(
@@ -306,7 +260,7 @@ app.layout = html.Div([
                         mode="lines",
                         line={"width": year_weights[year], "color": "green"},
                         opacity=year_alpha[year],
-                        name=f"={year}"
+                        name=f"{year}"
                     ) for year in years
                 ] + [
                     go.Scatter(
@@ -318,84 +272,109 @@ app.layout = html.Div([
                     )
                 ],
                 "layout": go.Layout(
-                    title="Min Temperatures: Historical vs Forecast",
-                    xaxis={"title": "Day Count"},
-                    yaxis={"title": "Min Temperature (°C)"},
-                    width=1200,  
-                    height=600,  
-                    legend={"x": 1, "y": 1},
+                    title=f"{location} - Min Temperatures",
+                    xaxis={"title": "Day of Year"},
+                    yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
             }
-        )
-    ]),
-
-    html.Div([
+        ),
+        # Average Max Temperature Graph
         dcc.Graph(
-            id="average-max-plot",
+            id=f"{location}-average-max-plot",
             figure={
                 "data": [
                     go.Scatter(
                         x=mean_h_df["day_count"],
                         y=mean_h_df["max"],
                         mode="lines",
-                        line={"width": 3, "dash": "dash", "color": "orange"},
+                        line={"width": 3, "dash": "dash", "color": "blue"},
                         name="Historical Avg Max"
                     ),
                     go.Scatter(
                         x=f_df["day_count"],
                         y=f_df["max"],
                         mode="lines",
-                        line={"width": 3, "dash": "dash", "color": "blue"},
+                        line={"width": 3, "dash": "dash", "color": "orange"},
                         name="Forecast Max"
                     )
                 ],
                 "layout": go.Layout(
-                    title="Average Max Temperatures: Historical vs Forecast",
-                    xaxis={"title": "Day Count"},
-                    yaxis={"title": "Max Temperature (°C)"},
-                    width=1200,  
-                    height=600,  
-                    legend={"x": 1.3, "y": 1},
+                    title=f"{location} - Average Max Temperatures",
+                    xaxis={"title": "Day of Year"},
+                    yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
             }
-        )
-    ]),
-
-    html.Div([
+        ),
+        # Average Min Temperature Graph
         dcc.Graph(
-            id="average-min-plot",
+            id=f"{location}-average-min-plot",
             figure={
                 "data": [
                     go.Scatter(
                         x=mean_h_df["day_count"],
                         y=mean_h_df["min"],
                         mode="lines",
-                        line={"width": 3, "dash": "dash", "color": "orange"},
+                        line={"width": 3, "dash": "dash", "color": "green"},
                         name="Historical Avg Min"
                     ),
                     go.Scatter(
                         x=f_df["day_count"],
                         y=f_df["min"],
                         mode="lines",
-                        line={"width": 3, "dash": "dash", "color": "blue"},
+                        line={"width": 3, "dash": "dash", "color": "red"},
                         name="Forecast Min"
                     )
                 ],
                 "layout": go.Layout(
-                    title="Average Min Temperatures: Historical vs Forecast",
-                    xaxis={"title": "Day Count"},
-                    yaxis={"title": "Min Temperature (°C)"},
-                    width=1200,  
-                    height=600,  
-                    legend={"x": 1, "y": 1},
+                    title=f"{location} - Average Min Temperatures",
+                    xaxis={"title": "Day of Year"},
+                    yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
             }
         )
+    ]
+    return graphs
+
+def create_tab(location_data, title):
+    return dcc.Tab(
+        label=title,
+        children=[
+            html.Div([
+                html.Div([
+                    html.H2(location, style={"text-align": "center"}),
+                    *generate_graphs(location, data)
+                ], 
+                style={
+                    "display": "flex",
+                    "flex-direction": "column",
+                    "align-items": "center",
+                    "padding": "10px",
+                    "margin": "10px",
+                    "width": "45%"  # Set each graph container to 45% width
+                })
+                for location, data in location_data.items()
+            ], 
+            style={
+                "display": "flex",
+                "flex-wrap": "wrap",  # Wrap rows if more than 2 columns
+                "justify-content": "space-between",  # Space between columns
+                "padding": "20px",
+                "overflow-y": "auto",  # Enable vertical scrolling
+                "box-sizing": "border-box"
+            })
+        ]
+    )
+
+app.layout = html.Div([
+    html.H1("Weather Dashboard", style={'text-align': 'center'}),
+    dcc.Tabs([
+        create_tab(padd1a_locations, "PADD 1A"),
+        create_tab(padd1b_locations, "PADD 1B")
     ])
 ])
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run_server(debug=True)
