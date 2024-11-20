@@ -408,3 +408,34 @@ app.layout = html.Div([
 
 if __name__ == "__main__":
     app.run_server(host="192.168.2.112", port=8050, debug=False)
+
+import matplotlib.pyplot as plt
+
+test=processed_data["Baltimore"]["historical"]
+
+test_old=test[(test["year"]<2024)*(test["year"]>2020)]
+test_old=test_old.groupby("day_count").mean()[["mean"]]
+test_old=test_old.head(324)
+
+test_24=test[test["year"]==2024].set_index("day_count")[["mean"]]
+
+comb=pd.concat([test_old,test_24],axis=1).dropna()
+comb.columns=["mean_old","mean24"]
+
+plt.figure(figsize=(12,6))
+plt.plot(comb["mean_old"],label="hist avg since 2020")
+plt.plot(comb["mean24"],label="2024")
+plt.title("Baltimore example")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12,6))
+plt.axhline(y=(comb["mean24"]-comb["mean_old"]).std(),color="black")
+plt.axhline(y=-(comb["mean24"]-comb["mean_old"]).std(),color="black")
+plt.plot(comb["mean24"]-comb["mean_old"],label="hist avg since 2020")
+plt.plot((comb["mean24"]-comb["mean_old"]).rolling(window=7).mean().dropna(),label="rolling week avg")
+
+plt.title("Baltimore example")
+plt.legend()
+plt.show()
+
