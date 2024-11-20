@@ -191,14 +191,22 @@ for location, h_df in historical_data_dict.items():
     f_df["date"] = pd.to_datetime(f_df["date"])
     f_df["day_count"] = f_df["date"].dt.dayofyear
 
+    # Filter historical data to overlap with forecast
     historical_overlap = h_df[h_df["day_count"].isin(f_df["day_count"])]
     mean_historical = historical_overlap.groupby("day_count").mean().reset_index()
+
+    # Calculate the average of the last 3 years
+    mean_last_3_years = h_df[h_df["day_count"].isin(f_df["day_count"])]
+    mean_last_3_years=mean_last_3_years[mean_last_3_years["year"]>=2021]
+    mean_last_3_years = mean_last_3_years.groupby("day_count").mean().reset_index()
 
     processed_data[location] = {
         "historical": h_df,
         "forecast": f_df,
-        "mean_historical": mean_historical
+        "mean_historical": mean_historical,
+        "mean_last_3_years": mean_last_3_years  # Add this to processed data
     }
+
 
 
 
@@ -212,7 +220,9 @@ app = Dash(__name__)
 def generate_graphs(location, data):
     h_df = data["historical"]
     f_df = data["forecast"]
+    h_df=h_df[h_df["day_count"].isin(f_df["day_count"])]
     mean_h_df = data["mean_historical"]
+    mean_last_3_years = data["mean_last_3_years"]
 
     years = sorted(h_df["year"].unique())
     year_weights = {year: max(0.5, 3 - (f_df["date"].dt.year.max() - year) * 0.2) for year in years}
@@ -242,12 +252,15 @@ def generate_graphs(location, data):
                     )
                 ],
                 "layout": go.Layout(
-                    title=f"{location} - Max Temperatures",
+                    title=f"Max Temperatures",
                     xaxis={"title": "Day of Year"},
                     yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
-            }
+            },
+            style={"height": "100%", "width": "100%"}
+
+            
         ),
         # Min Temperature Graph
         dcc.Graph(
@@ -272,14 +285,14 @@ def generate_graphs(location, data):
                     )
                 ],
                 "layout": go.Layout(
-                    title=f"{location} - Min Temperatures",
+                    title=f"Min Temperatures",
                     xaxis={"title": "Day of Year"},
                     yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
-            }
+            },
+            style={"height": "100%", "width": "100%"}
         ),
-        # Average Max Temperature Graph
         dcc.Graph(
             id=f"{location}-average-max-plot",
             figure={
@@ -292,6 +305,13 @@ def generate_graphs(location, data):
                         name="Historical Avg Max"
                     ),
                     go.Scatter(
+                        x=mean_last_3_years["day_count"],
+                        y=mean_last_3_years["max"],
+                        mode="lines",
+                        line={"width": 3, "dash": "dot", "color": "purple"},
+                        name="Last 3 Years Avg Max"
+                    ),
+                    go.Scatter(
                         x=f_df["day_count"],
                         y=f_df["max"],
                         mode="lines",
@@ -300,12 +320,13 @@ def generate_graphs(location, data):
                     )
                 ],
                 "layout": go.Layout(
-                    title=f"{location} - Average Max Temperatures",
+                    title=f"Average Max Temperatures",
                     xaxis={"title": "Day of Year"},
                     yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
-            }
+            },
+            style={"height": "100%", "width": "100%"}
         ),
         # Average Min Temperature Graph
         dcc.Graph(
@@ -320,6 +341,13 @@ def generate_graphs(location, data):
                         name="Historical Avg Min"
                     ),
                     go.Scatter(
+                        x=mean_last_3_years["day_count"],
+                        y=mean_last_3_years["min"],
+                        mode="lines",
+                        line={"width": 3, "dash": "dot", "color": "purple"},
+                        name="Last 3 Years Avg Min"
+                    ),
+                    go.Scatter(
                         x=f_df["day_count"],
                         y=f_df["min"],
                         mode="lines",
@@ -328,12 +356,13 @@ def generate_graphs(location, data):
                     )
                 ],
                 "layout": go.Layout(
-                    title=f"{location} - Average Min Temperatures",
+                    title=f"Average Min Temperatures",
                     xaxis={"title": "Day of Year"},
                     yaxis={"title": "Temperature (°C)"},
                     template="plotly_white"
                 )
-            }
+            },
+            style={"height": "100%", "width": "100%"}
         )
     ]
     return graphs
@@ -351,18 +380,19 @@ def create_tab(location_data, title):
                     "display": "flex",
                     "flex-direction": "column",
                     "align-items": "center",
-                    "padding": "10px",
-                    "margin": "10px",
-                    "width": "45%"  # Set each graph container to 45% width
+                    "padding": "5px",
+                    "margin": "5px",
+                    "width": "32%",  # Adjusted width for three columns
+                    "box-sizing": "border-box"
                 })
                 for location, data in location_data.items()
             ], 
             style={
                 "display": "flex",
-                "flex-wrap": "wrap",  # Wrap rows if more than 2 columns
-                "justify-content": "space-between",  # Space between columns
-                "padding": "20px",
-                "overflow-y": "auto",  # Enable vertical scrolling
+                "flex-wrap": "wrap",  # Allows wrapping to next row
+                "justify-content": "space-between",  # Distribute space evenly
+                "padding": "10px",
+                "overflow-y": "auto",  # Enable vertical scrolling if needed
                 "box-sizing": "border-box"
             })
         ]
@@ -377,4 +407,4 @@ app.layout = html.Div([
 ])
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run_server(host="192.168.2.112", port=8050, debug=False)
