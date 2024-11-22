@@ -210,7 +210,6 @@ for location, h_df in historical_data_dict.items():
 
 
 
-# Assuming processed_data and location_to_padd are already defined
 padd1a_locations = {k: v for k, v in processed_data.items() if location_to_padd[k] == "PADD 1A"}
 padd1b_locations = {k: v for k, v in processed_data.items() if location_to_padd[k] == "PADD 1B"}
 
