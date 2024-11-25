@@ -328,6 +328,57 @@ def generate_graphs(location, data):
             },
             style={"height": "100%", "width": "100%"}
         ),
+        dcc.Graph(
+            id=f"{location}-dif_in_max",
+            figure={
+                "data": [
+                    go.Scatter(
+                        x=mean_h_df["day_count"],
+                        y=f_df["max"] - mean_h_df["max"],
+                        mode="lines",
+                        line={"width": 3, "dash": "dash", "color": "green"},
+                        name="Historical Avg Min"
+                    )
+                ],
+                "layout": go.Layout(
+                    title=f"Difference in Max",
+                    xaxis={"title": "Day of Year"},
+                    yaxis={"title": "Temperature (°C)"},
+                    template="plotly_white",
+                    shapes=[
+                        # Horizontal line at +5
+                        {
+                            "type": "line",
+                            "x0": mean_h_df["day_count"].min(),
+                            "x1": mean_h_df["day_count"].max(),
+                            "y0": 5,
+                            "y1": 5,
+                            "opacity": 0.8,  # Apply opacity here
+                            "line": {
+                                "color": "black",
+                                "width": 3,
+                                "dash": "dot"
+                            }
+                        },
+                        # Horizontal line at -5
+                        {
+                            "type": "line",
+                            "x0": mean_h_df["day_count"].min(),
+                            "x1": mean_h_df["day_count"].max(),
+                            "y0": -5,
+                            "y1": -5,
+                            "opacity": 0.8,  # Apply opacity here
+                            "line": {
+                                "color": "black",
+                                "width": 3,
+                                "dash": "dot"
+                            }
+                        }
+                    ]
+                )
+            },
+            style={"height": "100%", "width": "100%"}
+        ),
         # Average Min Temperature Graph
         dcc.Graph(
             id=f"{location}-average-min-plot",
@@ -363,7 +414,59 @@ def generate_graphs(location, data):
                 )
             },
             style={"height": "100%", "width": "100%"}
+        ),
+        dcc.Graph(
+            id=f"{location}-dif_in_min",
+            figure={
+                "data": [
+                    go.Scatter(
+                        x=mean_h_df["day_count"],
+                        y=f_df["min"] - mean_h_df["min"],
+                        mode="lines",
+                        line={"width": 3, "dash": "dash", "color": "green"},
+                        name="Historical Avg Min"
+                    )
+                ],
+                "layout": go.Layout(
+                    title=f"Difference in Min",
+                    xaxis={"title": "Day of Year"},
+                    yaxis={"title": "Temperature (°C)"},
+                    template="plotly_white",
+                    shapes=[
+                        # Horizontal line at +5
+                        {
+                            "type": "line",
+                            "x0": mean_h_df["day_count"].min(),
+                            "x1": mean_h_df["day_count"].max(),
+                            "y0": 5,
+                            "y1": 5,
+                            "opacity": 0.8,  # Apply opacity here
+                            "line": {
+                                "color": "black",
+                                "width": 3,
+                                "dash": "dot"
+                            }
+                        },
+                        # Horizontal line at -5
+                        {
+                            "type": "line",
+                            "x0": mean_h_df["day_count"].min(),
+                            "x1": mean_h_df["day_count"].max(),
+                            "y0": -5,
+                            "y1": -5,
+                            "opacity": 0.8,  # Apply opacity here
+                            "line": {
+                                "color": "black",
+                                "width": 3,
+                                "dash": "dot"
+                            }
+                        }
+                    ]
+                )
+            },
+            style={"height": "100%", "width": "100%"}
         )
+
     ]
     return graphs
 
@@ -407,4 +510,44 @@ app.layout = html.Div([
 ])
 
 if __name__ == "__main__":
-    app.run_server(host="192.168.2.112", port=8050, debug=False)
+    app.run_server(host="127.0.0.1", port=8050, debug=True)
+
+
+
+
+
+import matplotlib.pyplot as plt
+
+test=processed_data["Baltimore"]["historical"]
+
+test_old=test[(test["year"]<2024)*(test["year"]>2020)]
+test_old=test_old.groupby("day_count").mean()[["mean"]]
+test_old=test_old.head(324)
+
+test_24=test[test["year"]==2024].set_index("day_count")[["mean"]]
+
+comb=pd.concat([test_old,test_24],axis=1).dropna()
+comb.columns=["mean_old","mean24"]
+
+plt.figure(figsize=(12,6))
+plt.plot(comb["mean_old"],label="hist avg since 2020")
+plt.plot(comb["mean24"],label="2024")
+plt.title("Baltimore example")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12,6))
+plt.axhline(y=(comb["mean24"]-comb["mean_old"]).std(),color="black")
+plt.axhline(y=-(comb["mean24"]-comb["mean_old"]).std(),color="black")
+plt.plot(comb["mean24"]-comb["mean_old"],label="hist avg since 2020")
+plt.plot((comb["mean24"]-comb["mean_old"]).rolling(window=7).mean().dropna(),label="rolling week avg")
+
+plt.title("Baltimore example")
+plt.legend()
+plt.show()
+
+
+
+
+
+
